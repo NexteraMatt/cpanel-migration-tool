@@ -45,7 +45,6 @@ Ensure the necessary packages are installed:
 - cpanel-migration.sh – Main migration script that initiates the process.
 - cpanel_migration.yml – Ansible playbook for handling the migration.
 - migrate_account.yml – Task file used by the playbook for processing each account.
-- cpanel_migration.yml – Configuration file for the migration process.
 
 ## Contributing
 Contributions, bug reports, and feature requests are welcome! Please open an issue or submit a pull request on GitHub.
