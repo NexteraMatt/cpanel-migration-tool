@@ -1,0 +1,103 @@
+---
+# We assume 'acct' is a dict: { "orig": "acctName", "new": "acctName_bak" }
+
+- name: "01: Backup cPanel Account ({{ acct.orig }}) on Source VM"
+  shell: "/scripts/pkgacct {{ acct.orig }}"
+  delegate_to: "{{ source_vm }}"
+  register: backup_result
+  vars:
+    ansible_ssh_port: "{{ source_ssh_port }}"
+    ansible_ssh_user: root
+    ansible_ssh_pass: "{{ source_vm_password }}"
+  changed_when: false
+  failed_when: backup_result.rc != 0
+
+- name: "02: Check for cpmove-{{ acct.orig }}.tar.gz on Source VM"
+  shell: "ls -l /home/cpmove/cpmove-{{ acct.orig }}.tar.gz || ls -l /home/cpmove-{{ acct.orig }}.tar.gz"
+  register: backup_check
+  delegate_to: "{{ source_vm }}"
+  vars:
+    ansible_ssh_port: "{{ source_ssh_port }}"
+    ansible_ssh_user: root
+    ansible_ssh_pass: "{{ source_vm_password }}"
+  failed_when: "'No such file' in backup_check.stdout"
+  changed_when: false
+
+- name: "03: Copy Backup to Jumpbox for ({{ acct.orig }})"
+  local_action:
+    module: shell
+    cmd: >
+      sshpass -p "{{ source_vm_password }}"
+      scp -P {{ source_ssh_port }}
+      -o StrictHostKeyChecking=no
+      root@{{ source_vm }}:/home/cpmove/cpmove-{{ acct.orig }}.tar.gz
+      /tmp/ 2>/dev/null
+      ||
+      sshpass -p "{{ source_vm_password }}"
+      scp -P {{ source_ssh_port }}
+      -o StrictHostKeyChecking=no
+      root@{{ source_vm }}:/home/cpmove-{{ acct.orig }}.tar.gz
+      /tmp/
+  register: scp_to_jumpbox
+  failed_when: scp_to_jumpbox.rc != 0
+  changed_when: false
+
+- name: "03b: Remove backup file from Source VM after transfer"
+  shell: "rm -f /home/cpmove/cpmove-{{ acct.orig }}.tar.gz || rm -f /home/cpmove-{{ acct.orig }}.tar.gz"
+  delegate_to: "{{ source_vm }}"
+  vars:
+    ansible_ssh_port: "{{ source_ssh_port }}"
+    ansible_ssh_user: root
+    ansible_ssh_pass: "{{ source_vm_password }}"
+  changed_when: false
+  ignore_errors: yes
+
+- name: "04: Copy Backup from Jumpbox to Target VM for ({{ acct.new }})"
+  local_action:
+    module: shell
+    cmd: >
+      sshpass -p "{{ target_vm_password }}"
+      scp -P {{ target_ssh_port }}
+      -o StrictHostKeyChecking=no
+      /tmp/cpmove-{{ acct.orig }}.tar.gz
+      root@{{ target_vm }}:/home/
+  register: scp_to_target
+  failed_when: scp_to_target.rc != 0
+  changed_when: false
+
+- name: "04b: Remove backup file from Jumpbox after transfer"
+  local_action:
+    module: file
+    path: "/tmp/cpmove-{{ acct.orig }}.tar.gz"
+    state: absent
+  changed_when: false
+
+- name: "05: Restore cPanel Account ({{ acct.orig }}) on Target as ({{ acct.new }})"
+  shell: "/scripts/restorepkg --newuser {{ acct.new }} /home/cpmove-{{ acct.orig }}.tar.gz"
+  register: restore_result
+  delegate_to: "{{ target_vm }}"
+  vars:
+    ansible_ssh_port: "{{ target_ssh_port }}"
+    ansible_ssh_user: root
+    ansible_ssh_pass: "{{ target_vm_password }}"
+  failed_when: restore_result.rc != 0
+  changed_when: false
+
+- name: "06: Clean up backup file ({{ acct.orig }}) on Target VM after restore"
+  shell: "rm -f /home/cpmove-{{ acct.orig }}.tar.gz"
+  delegate_to: "{{ target_vm }}"
+  vars:
+    ansible_ssh_port: "{{ target_ssh_port }}"
+    ansible_ssh_user: root
+    ansible_ssh_pass: "{{ target_vm_password }}"
+  changed_when: false
+  ignore_errors: yes
+
+- name: "99: Migration complete for ({{ acct.orig }}) => ({{ acct.new }})"
+  debug:
+    msg: "Successfully migrated account {{ acct.orig }} to new user {{ acct.new }}"
+
+- name: Log Migration Completion
+  local_action:
+    module: shell
+    cmd: echo "Successfully migrated {{ acct.orig }} to {{ acct.new }} at $(date)" >> /var/log/cpanel-migrations.log
