@@ -1,0 +1,45 @@
+---
+- name: "Migrate Multiple cPanel Accounts with Automatic Rename (Dynamic Selection)"
+  hosts: localhost
+  gather_facts: no
+
+  vars:
+    source_vm: ""
+    source_ssh_port: 22
+    target_vm: ""
+    target_ssh_port: 22
+    cpanel_accounts: ""  # JSON array
+    source_vm_password: ""
+    target_vm_password: ""
+    log_file: "/var/log/cpanel-migrations.log"
+
+  tasks:
+    - name: Log Migration Start
+      local_action:
+        module: shell
+        cmd: "echo \"Migration started at \\$(date) for accounts: {{ cpanel_accounts }}\" >> \"{{ log_file }}\""
+
+    - name: Parse cpanel_accounts as JSON
+      set_fact:
+        cpanel_accounts_renamed: "{{ cpanel_accounts | from_json }}"
+      when: cpanel_accounts != ""
+
+    - name: Debug - Show final renamed list
+      debug:
+        var: cpanel_accounts_renamed
+
+    - name: Log Parsed Accounts
+      local_action:
+        module: shell
+        cmd: "echo \"Accounts to migrate: {{ cpanel_accounts_renamed | map(attribute='new') | join(', ') }} at \\$(date)\" >> \"{{ log_file }}\""
+
+    - name: Include per-account tasks
+      include_tasks: migrate_account.yml
+      loop: "{{ cpanel_accounts_renamed }}"
+      loop_control:
+        loop_var: acct
+
+    - name: Log Migration Completion
+      local_action:
+        module: shell
+        cmd: "echo \"Migration completed successfully at \\$(date) for accounts: {{ cpanel_accounts_renamed | map(attribute='new') | join(', ') }}\" >> \"{{ log_file }}\""
